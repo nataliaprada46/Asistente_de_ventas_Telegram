@@ -1,0 +1,736 @@
+{
+  "name": "Asistente Ventas Telegram",
+  "nodes": [
+    {
+      "parameters": {
+        "updates": [
+          "message"
+        ],
+        "additionalFields": {}
+      },
+      "id": "166bba97-8abd-4166-8fba-b1bf5fe8d732",
+      "name": "Telegram Trigger",
+      "type": "n8n-nodes-base.telegramTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        -1136,
+        240
+      ],
+      "webhookId": "auto-generated",
+      "credentials": {
+        "telegramApi": {
+          "id": "QMMWedBjRc0z3RxS",
+          "name": "Telegram Bot - ventas"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Extraer datos del mensaje de Telegram\nconst mensaje = $input.item.json.message;\n\nconst datosCliente = {\n  chatId: mensaje.chat.id,\n  nombreCliente: mensaje.from.first_name + ' ' + (mensaje.from.last_name || ''),\n  username: mensaje.from.username || 'Sin username',\n  mensaje: mensaje.text || '',\n  fecha: new Date().toLocaleString('es-ES'),\n  timestamp: new Date().toISOString()\n};\n\nconsole.log('📩 Mensaje recibido de:', datosCliente.nombreCliente);\nconsole.log('💬 Contenido:', datosCliente.mensaje);\n\nreturn { json: datosCliente };"
+      },
+      "id": "4a1ff192-cabb-477b-961e-fe893963e17b",
+      "name": "Preparar datos",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -912,
+        240
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parsear clasificación del LLM\nconst aiResponse = $input.item.json;\nconst datosCliente = $('Preparar datos').item.json;\n\nlet intencion = 'CONSULTA'; // Default\n\ntry {\n  let responseText = '';\n  \n  // Extraer texto de diferentes formatos posibles\n  if (typeof aiResponse.output === 'string') {\n    responseText = aiResponse.output;\n  } else if (typeof aiResponse === 'string') {\n    responseText = aiResponse;\n  } else if (aiResponse.text) {\n    responseText = aiResponse.text;\n  } else {\n    responseText = JSON.stringify(aiResponse);\n  }\n  \n  // Limpiar markdown\n  const cleanText = responseText\n    .replace(/```json/g, '')\n    .replace(/```/g, '')\n    .trim();\n  \n  // Buscar JSON\n  const jsonMatch = cleanText.match(/\\{[\\s\\S]*\\}/);\n  \n  if (jsonMatch) {\n    const parsed = JSON.parse(jsonMatch[0]);\n    intencion = parsed.intencion || 'CONSULTA';\n  } else {\n    // Buscar palabras clave si no hay JSON\n    if (cleanText.includes('COMPRA')) intencion = 'COMPRA';\n    else if (cleanText.includes('SOPORTE')) intencion = 'SOPORTE';\n    else intencion = 'CONSULTA';\n  }\n  \n} catch (error) {\n  console.log('⚠️ Error parseando:', error.message);\n  intencion = 'CONSULTA';\n}\n\nconsole.log('🎯 Intención clasificada:', intencion);\n\nreturn {\n  json: {\n    ...datosCliente,\n    intencion: intencion,\n    clasificacionRaw: aiResponse\n  }\n};"
+      },
+      "id": "2c075391-1c6b-43e5-8257-84fd78665073",
+      "name": "Parsear clasificación",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -336,
+        240
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{ $json.intencion }}",
+              "value2": "COMPRA"
+            }
+          ]
+        }
+      },
+      "id": "1adb54eb-e798-46ba-970f-90aa41ca0a99",
+      "name": "IF - ¿Es COMPRA?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        -1104,
+        800
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Formatear respuesta de COMPRA\nconst aiResponse = $input.item.json;\nconst datosCliente = $('Parsear clasificación').item.json;\n\nlet respuestaGenerada = '';\n\nif (typeof aiResponse.output === 'string') {\n  respuestaGenerada = aiResponse.output.trim();\n} else if (typeof aiResponse === 'string') {\n  respuestaGenerada = aiResponse.trim();\n} else if (aiResponse.text) {\n  respuestaGenerada = aiResponse.text.trim();\n} else {\n  respuestaGenerada = 'Gracias por tu interés. Un asesor te contactará pronto.';\n}\n\nconsole.log('✅ Respuesta generada (COMPRA):', respuestaGenerada.substring(0, 50) + '...');\n\nreturn {\n  json: {\n    ...datosCliente,\n    respuestaGenerada: respuestaGenerada,\n    tipoRespuesta: 'COMPRA',\n    notificarVentas: true\n  }\n};"
+      },
+      "id": "bb58467a-1945-4ac8-9c67-d7b256930752",
+      "name": "Format respuesta COMPRA",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -416,
+        560
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Formatear respuesta de CONSULTA/SOPORTE\nconst aiResponse = $input.item.json;\nconst datosCliente = $('Parsear clasificación').item.json;\n\nlet respuestaGenerada = '';\n\nif (typeof aiResponse.output === 'string') {\n  respuestaGenerada = aiResponse.output.trim();\n} else if (typeof aiResponse === 'string') {\n  respuestaGenerada = aiResponse.trim();\n} else if (aiResponse.text) {\n  respuestaGenerada = aiResponse.text.trim();\n} else {\n  respuestaGenerada = 'Gracias por contactarnos. ¿En qué más puedo ayudarte?';\n}\n\nconsole.log('✅ Respuesta generada (CONSULTA/SOPORTE):', respuestaGenerada.substring(0, 50) + '...');\n\nreturn {\n  json: {\n    ...datosCliente,\n    respuestaGenerada: respuestaGenerada,\n    tipoRespuesta: datosCliente.intencion,\n    notificarVentas: false\n  }\n};"
+      },
+      "id": "31ae5818-c723-4d5e-b503-5e655de332b7",
+      "name": "Format respuesta CONSULTA",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -432,
+        864
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "combine",
+        "combinationMode": "mergeByPosition",
+        "options": {}
+      },
+      "id": "3600801f-5523-44f5-bec4-b44c2fa32019",
+      "name": "Merge",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 2.1,
+      "position": [
+        -176,
+        992
+      ]
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $json.chatId }}",
+        "text": "={{ $json.respuestaGenerada }}",
+        "additionalFields": {}
+      },
+      "id": "8a302cab-7d42-41c7-bff9-b1d180d8ba2e",
+      "name": "Responder en Telegram",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        -944,
+        1456
+      ],
+      "webhookId": "c1051e64-a29c-41a5-8d17-b992dc340259",
+      "credentials": {
+        "telegramApi": {
+          "id": "QMMWedBjRc0z3RxS",
+          "name": "Telegram Bot - ventas"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "1RbpEJfWglsv1I_-BF4yLcyJIbJ4PX_RFUwl5z_GdCtA",
+          "mode": "list",
+          "cachedResultName": "Asistente_ventas_bot (Telegram)",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1RbpEJfWglsv1I_-BF4yLcyJIbJ4PX_RFUwl5z_GdCtA/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "gid=0",
+          "mode": "list",
+          "cachedResultName": "Hoja 1"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Cliente": "={{ $('Merge').item.json.nombreCliente }}",
+            "Mensaje": "={{ $('Merge').item.json.mensaje }}",
+            "Respuesta": "={{ $('Merge').item.json.respuestaGenerada }}",
+            "Fecha": "={{ $('Merge').item.json.fecha }}",
+            "Username": "={{ $('Merge').item.json.username }}",
+            "Intención": "={{ $('Merge').item.json.intencion }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "Fecha",
+              "displayName": "Fecha",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Cliente",
+              "displayName": "Cliente",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Username",
+              "displayName": "Username",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Mensaje",
+              "displayName": "Mensaje",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Intención",
+              "displayName": "Intención",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Respuesta",
+              "displayName": "Respuesta",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Notificado",
+              "displayName": "Notificado",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "ok",
+              "displayName": "ok",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "result",
+              "displayName": "result",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "130992f9-52c3-4630-9b43-60d74ff268a8",
+      "name": "Guardar en Google Sheets",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.4,
+      "position": [
+        -592,
+        1456
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "e7D1d1VsmJNBWkmh",
+          "name": "Google Sheets account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1,
+      "position": [
+        -688,
+        112
+      ],
+      "id": "f8b14bcc-6e78-4a8b-a1d1-15380dd8a93a",
+      "name": "Google Gemini Chat Model",
+      "credentials": {
+        "googlePalmApi": {
+          "id": "0d6Dvq65NF9MvBuH",
+          "name": "Google Gemini(PaLM) Api account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1,
+      "position": [
+        -752,
+        704
+      ],
+      "id": "1c63a199-a0bb-419c-9fbf-08a4bbf6dc7e",
+      "name": "Google Gemini Chat Model1",
+      "credentials": {
+        "googlePalmApi": {
+          "id": "0d6Dvq65NF9MvBuH",
+          "name": "Google Gemini(PaLM) Api account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1,
+      "position": [
+        -752,
+        944
+      ],
+      "id": "8d53cfb4-0e01-405a-bfb5-5aea1815795f",
+      "name": "Google Gemini Chat Model2",
+      "credentials": {
+        "googlePalmApi": {
+          "id": "0d6Dvq65NF9MvBuH",
+          "name": "Google Gemini(PaLM) Api account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "sendTo": "nataliaprada4695@gmail.com",
+        "subject": "🔔 OPORTUNIDAD DE VENTA - Cliente interesado",
+        "emailType": "text",
+        "message": "=🎯 NUEVA OPORTUNIDAD DE VENTA\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n👤 DATOS DEL CLIENTE:\nNombre: {{ $json.nombreCliente }}\nUsername: @{{ $json.username }}\nFecha: {{ $json.fecha }}\n\n💬 MENSAJE ORIGINAL:\n\"{{ $json.mensaje }}\"\n\n🤖 RESPUESTA AUTOMÁTICA ENVIADA:\n\"{{ $json.respuestaGenerada }}\"\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n⚡ ACCIÓN REQUERIDA:\nPor favor, contacta a este cliente lo antes posible para cerrar la venta.\n\nPuedes responderle directamente en Telegram a @{{ $json.username }}\n\n---\n",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        -384,
+        1248
+      ],
+      "id": "c9be4dba-0b38-4f12-b816-8e96f46add60",
+      "name": "Enviar mail",
+      "webhookId": "cb16ba2a-aa5a-42b9-ade2-9b2b0d97dfbd",
+      "executeOnce": false,
+      "alwaysOutputData": false,
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "3P5voGOXIRn16pNd",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## 🤖 ASISTENTE DE VENTAS - TELEGRAM BOT\nWorkflow automatizado que clasifica mensajes de clientes y  responde de forma personalizada usando IA \n\n✨ CARACTERÍSTICAS:\n- Trigger automático (Telegram)\n- 2 LLMs con roles distintos (Clasificación + Generación)\n- Flujo condicional basado en intención\n- Notificaciones por email\n- Registro en Google Sheets\n\n🎯 RESULTADO: Cliente recibe respuesta personalizada automática",
+        "height": 528,
+        "width": 576,
+        "color": 4
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        -2048,
+        16
+      ],
+      "typeVersion": 1,
+      "id": "d0746e73-4421-4fb7-802c-dee688635971",
+      "name": "Sticky Note"
+    },
+    {
+      "parameters": {
+        "content": "## 📱 PASO 1: CONFIGURACIÓN TELEGRAM BOT\n1. Crear Bot en Telegram:\n   • Abre Telegram → Busca @BotFather\n   • Envía: /newbot\n   • Elige nombre: \"Asistente Ventas Bot\"\n   • Copia el TOKEN proporcionado\n    • Agregar credencial en N8N\n\n2.Configurar nodos:\n   • Telegram Trigger: Detecta mensajes\n   • Preparar datos: Extrae info del cliente\n   • LLM 1: Clasifica intención \n(COMPRA/CONSULTA/SOPORTE)\n",
+        "height": 528,
+        "width": 1472,
+        "color": 5
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        -1472,
+        16
+      ],
+      "typeVersion": 1,
+      "id": "19016f14-f834-44fd-a76b-5f97ef9a3952",
+      "name": "Sticky Note1"
+    },
+    {
+      "parameters": {
+        "content": "## 🆘 TROUBLESHOOTING\n\n❌ \"Bot no responde\"\n→ Verifica que el workflow esté ACTIVO\n→ Revisa credencial de Telegram\n\n❌ \"LLM error / API key invalid\"\n→ Regenera API key en ai.google.dev\n→ Actualiza credencial en N8N\n\n❌ \"Email no se envía\"\n→ Verifica SMTP settings\n→ Usa contraseña de aplicación (no tu password normal)\n\n❌ \"IF siempre va a FALSE\"\n→ Verifica: notificarVentas === true\n→ Revisa output de \"Parsear clasificación\"\n\n❌ \"Google Sheets error\"\n→ Verifica permisos de la cuenta OAuth2\n→ Columnas deben coincidir exactamente\n\n💡 Ver logs en cada nodo para debugging\n",
+        "height": 768,
+        "width": 464,
+        "color": 3
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        0,
+        624
+      ],
+      "typeVersion": 1,
+      "id": "7c754746-e6d6-4ac2-90ba-7489efae4e79",
+      "name": "Sticky Note5"
+    },
+    {
+      "parameters": {
+        "content": "## 📖 CÓMO USAR ESTE WORKFLOW\n🚀 IMPORTAR:\n1. Copiar el JSON del workflow\n2. N8N → Import from Clipboard\n3. Pegar y confirmar\n\n🔑 CONFIGURAR CREDENCIALES:\n1. Telegram Bot Token (@BotFather)\n2. Google Gemini API Key (ai.google.dev)\n3. Gmail SMTP (Contraseña de aplicación)\n4. Google Sheets OAuth2\n\n📝 CONFIGURAR GOOGLE SHEETS:\n- Crear hoja con columnas:\n  Fecha | Cliente | Username | Mensaje | \n  Intención | Respuesta \n\n🧪 PROBAR:\n1. Envía mensaje al bot *\"Asistente_ventas_bot\"* en Telegram: \"Quiero comprar una laptop\"\n   → Debe clasificar como COMPRA\n   → Enviar email a ventas\n   \n2. Envía: \"¿Qué horarios tienen?\"\n   → Debe clasificar como CONSULTA\n   → NO enviar email\n\n✅ ACTIVAR: Toggle \"Active\" en el workflow",
+        "height": 608,
+        "width": 464,
+        "color": 7
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        0,
+        16
+      ],
+      "typeVersion": 1,
+      "id": "cc17c5df-c3f7-49df-9fc9-b1c3844ccdc4",
+      "name": "Sticky Note7"
+    },
+    {
+      "parameters": {
+        "content": "## 🔀 PASO 2: DECISIÓN INTELIGENTE\nParsear clasificación → IF condicional\n\nIF intencion === \"COMPRA\"\n  ├─ TRUE → LLM 2A (Respuesta de ventas)\n  └─ FALSE → LLM 2B (Respuesta informativa)\n\n🎯 REQUISITO CUMPLIDO:\n\"Condicional dependiente del LLM \ncon respuesta estructurada\"\n\nOutput LLM 1: {\"intencion\":\"COMPRA\"}",
+        "height": 640,
+        "width": 1472,
+        "color": 6
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        -1472,
+        544
+      ],
+      "typeVersion": 1,
+      "id": "252d99dc-8695-40c9-bc14-432efed2c803",
+      "name": "Sticky Note9"
+    },
+    {
+      "parameters": {
+        "content": "## 📨 PASO 3: ENTREGA & NOTIFICACIONES\n\n1. Responder en Telegram\n   → Envía respuesta AI al cliente\n\n2. IF - ¿Notificar ventas?\n   → Evalúa: tipoRespuesta === 'COMPRA'\n   ├─ TRUE → Email a ventas@empresa.com\n   └─ FALSE → Skip email\n\n3. Google Sheets (SIEMPRE)\n   → Registra desde nodo Merge:\n   • Fecha | Cliente | Username | Mensaje\n   • Intención | Respuesta \n\n✅ RESULTADO:\n- Cliente atendido en Telegram\n- Equipo notificado (si es COMPRA)\n- Todo registrado en Sheets (1 fila única)",
+        "height": 560,
+        "width": 1472,
+        "color": 5
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        -1472,
+        1184
+      ],
+      "typeVersion": 1,
+      "id": "ba9604f1-1d92-4365-967b-052ee58717ad",
+      "name": "Sticky Note10"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Analiza este mensaje de un cliente y clasifica su intención.\n\nMensaje del cliente:\n\"{{ $json.mensaje }}\"\n\nREGLAS DE CLASIFICACIÓN:\n\n1. COMPRA: El cliente quiere comprar un producto/servicio AHORA\n   - Menciona: \"quiero comprar\", \"cuánto cuesta\", \"precio\", \"disponibilidad\", \"me interesa\"\n   - Pregunta específica sobre productos para comprar\n   \n2. CONSULTA: El cliente pide información general\n   - Menciona: \"horarios\", \"ubicación\", \"cómo funciona\", \"qué ofrecen\"\n   - Preguntas informativas sin intención inmediata de compra\n   \n3. SOPORTE: El cliente tiene un problema o queja\n   - Menciona: \"problema\", \"no funciona\", \"reclamo\", \"error\", \"ayuda\"\n   - Expresa frustración o necesita asistencia técnica\n\nIMPORTANTE:\n1. Responde ÚNICAMENTE con JSON\n2. NO agregues explicaciones\n3. NO uses markdown (```json```)\n4. Formato exacto: {\"intencion\":\"COMPRA\"}\n\nValores permitidos: COMPRA, CONSULTA, SOPORTE\n",
+        "hasOutputParser": true,
+        "options": {
+          "systemMessage": "Eres un clasificador. Respondes SOLO con JSON en formato: {\"intencion\":\"COMPRA\"}. Nada más."
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3,
+      "position": [
+        -688,
+        240
+      ],
+      "id": "e3fdfb9c-85b5-4f3c-a094-93f293d27284",
+      "name": "LLM 1 - Clasificación"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Genera una respuesta profesional y útil para este cliente que quiere COMPRAR.\n\nDatos del cliente:\n- Nombre: {{ $json.nombreCliente }}\n- Mensaje: \"{{ $json.mensaje }}\"\n\nINSTRUCCIONES:\n1. Saluda al cliente por su nombre\n2. Confirma que entendiste su interés de compra\n3. Proporciona información relevante sobre productos/precios (inventa datos realistas)\n4. Indica que un asesor lo contactará pronto\n5. Tono profesional pero amigable\n6. Máximo 4-5 oraciones\n7. Usa emojis apropiados (1-2 máximo)\n\nEjemplo de productos (inventa precios realistas):\n- Laptops: $500-$1500\n- Celulares: $200-$800\n- Tablets: $150-$600\n\nResponde SOLO con el texto del mensaje (sin JSON, sin comillas).",
+        "options": {
+          "systemMessage": "Eres un asistente de ventas profesional y amigable. Ayudas a clientes interesados en comprar productos tecnológicos. Respondes de forma clara, concisa y útil."
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3,
+      "position": [
+        -736,
+        560
+      ],
+      "id": "ef317505-d050-4f4c-9a6c-fa849f0112c1",
+      "name": "LLM 2A - Respuesta Compra"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Genera una respuesta informativa para este cliente.\n\nDatos del cliente:\n- Nombre: {{ $json.nombreCliente }}\n- Mensaje: \"{{ $json.mensaje }}\"\n- Tipo: {{ $json.intencion }}\n\nINSTRUCCIONES:\n1. Saluda cordialmente\n2. Responde a su consulta de forma útil\n3. Si es SOPORTE: muestra empatía y asegura que lo ayudarán\n4. Si es CONSULTA: proporciona información general\n5. Ofrece ayuda adicional\n6. Máximo 3-4 oraciones\n7. Tono amable y profesional\n\nInformación general (usa según corresponda):\n- Horario: Lunes a Viernes 9:00 AM - 6:00 PM\n- Ubicación: Buenos Aires\n- Email: info@empresa.com\n- Teléfono: +54 11 1234 5678\n\nResponde SOLO con el texto del mensaje.",
+        "options": {
+          "systemMessage": "Eres un asistente virtual amable y profesional. Proporcionas información general y ayudas con consultas de soporte de manera empática."
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3,
+      "position": [
+        -752,
+        848
+      ],
+      "id": "6b586f09-21fa-4a07-8165-48470f356fbe",
+      "name": "LLM 2B - Respuesta Compra1"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "4773377d-8ddf-45ba-bc6b-be37309b9f64",
+              "leftValue": "={{ $json.tipoRespuesta }}",
+              "rightValue": "COMPRA",
+              "operator": {
+                "type": "string",
+                "operation": "equals",
+                "name": "filter.operator.equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -672,
+        1264
+      ],
+      "id": "aef08f90-c7c3-4aa7-8b7b-619b77a1f672",
+      "name": "If - ¿Notificar Ventas?"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Telegram Trigger": {
+      "main": [
+        [
+          {
+            "node": "Preparar datos",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parsear clasificación": {
+      "main": [
+        [
+          {
+            "node": "IF - ¿Es COMPRA?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format respuesta COMPRA": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format respuesta CONSULTA": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Merge": {
+      "main": [
+        [
+          {
+            "node": "Responder en Telegram",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "If - ¿Notificar Ventas?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Responder en Telegram": {
+      "main": [
+        [
+          {
+            "node": "Guardar en Google Sheets",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Preparar datos": {
+      "main": [
+        [
+          {
+            "node": "LLM 1 - Clasificación",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF - ¿Es COMPRA?": {
+      "main": [
+        [
+          {
+            "node": "LLM 2A - Respuesta Compra",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "LLM 2B - Respuesta Compra1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google Gemini Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "LLM 1 - Clasificación",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google Gemini Chat Model1": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "LLM 2A - Respuesta Compra",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google Gemini Chat Model2": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "LLM 2B - Respuesta Compra1",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "LLM 1 - Clasificación": {
+      "main": [
+        [
+          {
+            "node": "Parsear clasificación",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "LLM 2A - Respuesta Compra": {
+      "main": [
+        [
+          {
+            "node": "Format respuesta COMPRA",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "LLM 2B - Respuesta Compra1": {
+      "main": [
+        [
+          {
+            "node": "Format respuesta CONSULTA",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Enviar mail": {
+      "main": [
+        []
+      ]
+    },
+    "If - ¿Notificar Ventas?": {
+      "main": [
+        [
+          {
+            "node": "Enviar mail",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "05fa41ad-d6d8-454a-ae30-b5d667efe8cf",
+  "meta": {
+    "instanceId": "adf1277adeed32fb6ae4abfe420e5fa83504343f6260c26b2a48a56f741edf10"
+  },
+  "id": "UPvX4hAMq9trxKfF",
+  "tags": []
+}
